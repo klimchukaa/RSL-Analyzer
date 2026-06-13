@@ -1,0 +1,19 @@
+{
+  "name": "rsl-font-analyzer",
+  "version": "0.1.0",
+  "description": "Интерактивный анализатор записи жестов в системе Шрифт РЖЯ.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "node server.mjs"
+  },
+  "keywords": [
+    "rsl",
+    "russian-sign-language",
+    "parser",
+    "linguistics"
+  ],
+  "author": "Student project",
+  "license": "MIT",
+  "devDependencies": {}
+}
