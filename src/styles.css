@@ -1,0 +1,263 @@
+@font-face {
+  font-family: "RSLFont";
+  /* Порядок источников = порядок попыток подключения:
+     1) шрифт, уже установленный в системе пользователя;
+     2) копия, лежащая в самом репозитории (работает офлайн);
+     3) запасной вариант с CDN jsDelivr прямо из репозитория AjnoEO/rslfont. */
+  src: local("Ajno"), local("RSL Font"),
+       url("../assets/fonts/rsl-font.ttf") format("truetype"),
+       url("https://cdn.jsdelivr.net/gh/AjnoEO/rslfont@master/RSL_font/symbol_font_for_rsl/rsl-font.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  --bg: #f6f7fb;
+  --panel: #ffffff;
+  --panel-soft: #f0f3f9;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #d9deea;
+  --shadow: 0 16px 40px rgba(31, 41, 55, 0.08);
+  --ok: #2f855a;
+  --warning: #b7791f;
+  --error: #c53030;
+  --info: #2b6cb0;
+  --token-handshape: #dbeafe;
+  --token-orientation: #ccfbf1;
+  --token-location: #dcfce7;
+  --token-contact: #fee2e2;
+  --token-movement: #ffedd5;
+  --token-modifier: #e0f2fe;
+  --token-nonmanual: #fce7f3;
+  --token-service: #f1f5f9;
+  --token-ambiguous: #fef3c7;
+  --token-unknown: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.55;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.65rem 0.9rem;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+button:hover {
+  border-color: #9aa8c3;
+  box-shadow: 0 8px 20px rgba(31, 41, 55, 0.08);
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+.rsl-inline,
+.token-chip,
+.sample-button,
+textarea {
+  font-family: "RSLFont", "Segoe UI Symbol", "Noto Sans Symbols", monospace;
+}
+
+
+code,
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.95em;
+}
+
+.page-header {
+  padding: 3rem max(1.25rem, calc((100vw - 1180px) / 2)) 1.5rem;
+}
+
+.page-header h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2rem, 5vw, 4.2rem);
+  line-height: 1.05;
+}
+
+.lead {
+  max-width: 880px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.4fr);
+  gap: 1.25rem;
+  padding: 1rem max(1.25rem, calc((100vw - 1180px) / 2)) 3rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  padding: 1.2rem;
+}
+
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+}
+
+.input-panel {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+}
+
+textarea {
+  width: 100%;
+  min-height: 145px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1rem;
+  background: #fff;
+  color: var(--text);
+  font-size: 1.35rem;
+}
+
+.help-text {
+  color: var(--muted);
+  margin: 0.75rem 0 1rem;
+  font-size: 0.95rem;
+}
+
+.button-row,
+.samples,
+.legend,
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.samples {
+  margin-top: 0.75rem;
+}
+
+.sample-button {
+  font-size: 1.1rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.help-card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 18px;
+  background: var(--panel-soft);
+}
+
+
+
+
+.rsl-inline {
+  display: inline-block;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 0.1rem 0.3rem;
+  font-size: 1.05em;
+}
+
+.rsl-inline.in-text {
+  background: transparent;
+  padding: 0 0.06rem;
+  border-radius: 4px;
+}
+
+
+
+.results {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.stats {
+  margin: 0 0 1rem;
+}
+
+.stat-card {
+  min-width: 110px;
+  padding: 0.75rem 0.85rem;
+  border-radius: 16px;
+  background: var(--panel-soft);
+}
+
+.stat-card strong,
+.stat-card span {
+  display: block;
+}
+
+.stat-card strong {
+  font-size: 1.35rem;
+}
+
+.stat-card span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.highlight-box {
+  min-height: 3.8rem;
+  padding: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: #fcfdff;
+}
+
+.token-chip,
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  border-radius: 999px;
+  margin: 0 0.15rem 0.35rem 0;
+  padding: 0.25rem 0.55rem;
+  font-size: 1.1rem;
+}
+
+.token-chip {
+  cursor: pointer;
+  white-space: pre-wrap;
+}
+
+.token-chip:focus,
+.rsl-selectable:focus {
+  outline: 3px solid rgba(43, 108, 176, 0.35);
+  outline-offset: 2px;
+}
+
+.token-chip.is-selected,
+.rsl-selectable.is-selected {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.16);
+}
+
+.legend-item {
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+
