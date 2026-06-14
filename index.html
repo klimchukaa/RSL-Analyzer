@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Анализатор Шрифта РЖЯ</title>
+    <meta name="description" content="Интерактивный анализатор записи жестов в системе Шрифт РЖЯ: токены, кадры, таймлайны, подсветка и валидатор.">
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <h1>Анализатор Шрифта РЖЯ</h1>
+      <p class="lead">
+        Введите запись одного жеста. Приложение разбирает её на составные символы и цепочки,
+        показывает кадры/таймлайны, подсвечивает компоненты и предупреждает о возможных ошибках.
+      </p>
+    </header>
+
+    <main class="layout">
+      <section class="panel input-panel" aria-labelledby="input-title">
+        <h2 id="input-title">Ввод</h2>
+        <label for="input" class="muted">Запись в системе Шрифт РЖЯ</label>
+        <textarea id="input" spellcheck="false" aria-describedby="input-help"></textarea>
+        <p id="input-help" class="help-text">
+          Пробелы внутри ввода игнорируются: их можно ставить для читаемости между кадром и таймлайном.
+        </p>
+        <div class="button-row">
+          <button type="button" id="analyze-input">Разобрать</button>
+          <button type="button" id="clear-input">Очистить</button>
+          <button type="button" id="copy-json">Скопировать JSON</button>
+        </div>
+
+        <h3>Примеры</h3>
+        <div id="samples" class="samples" aria-label="Примеры записей"></div>
+
+        <aside class="help-card" aria-label="Краткая справка">
+          <h3>Краткая справка</h3>
+          <p>
+            Шрифт РЖЯ использует обычные символы клавиатуры как коды графических знаков.
+            Конфигурация руки чаще записывается одним символом, а ориентация, локализация,
+            движение и немануальные компоненты могут задаваться цепочками.
+          </p>
+          <p>
+            Кадр описывает положение рук и места выполнения жеста. Таймлайн описывает движение между кадрами.
+          </p>
+        </aside>
+      </section>
+
+      <section class="results" aria-label="Результаты разбора">
+        <section class="panel" aria-labelledby="summary-title">
+          <h2 id="summary-title">Сводка</h2>
+          <div id="stats" class="stats"></div>
+          <h3>Легенда</h3>
+          <div id="legend" class="legend"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="highlight-title">
+          <h2 id="highlight-title">Подсветка токенов</h2>
+          <div id="highlight" class="highlight-box"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="selection-title">
+          <h2 id="selection-title">Выбранный элемент</h2>
+          <div id="selection-details" class="selection-details"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="semantic-title">
+          <h2 id="semantic-title">Текстовое описание (beta)</h2>
+          <div id="semantic" class="semantic"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="diagnostics-title">
+          <h2 id="diagnostics-title">Валидатор</h2>
+          <div id="diagnostics" class="diagnostics"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="tree-title">
+          <h2 id="tree-title">Иерархический разбор</h2>
+          <div id="tree"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="sequences-title">
+          <h2 id="sequences-title">Возможные последовательности</h2>
+          <div id="sequences" class="sequences"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="tokens-title">
+          <h2 id="tokens-title">Таблица токенов</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Символы</th>
+                  <th>Тип</th>
+                  <th>Значение</th>
+                </tr>
+              </thead>
+              <tbody id="token-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="json-title">
+          <h2 id="json-title">JSON-разбор</h2>
+          <pre id="json-output" aria-live="polite"></pre>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Проект не является переводчиком РЖЯ → русский. Мини-словарь нужен только для подсказок по нескольким
+        примерам; основной результат — структурный анализ записи.
+      </p>
+    </footer>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
