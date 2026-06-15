@@ -133,3 +133,198 @@ function renderStats(parsed) {
  *
  * @param {object} parsed - Полный разбор.
  */
+function renderHighlight(parsed) {
+  highlight.replaceChildren();
+  if (parsed.tokens.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "muted";
+    empty.textContent = "Введите запись.";
+    highlight.append(empty);
+    return;
+  }
+
+  const raw = String(parsed.rawInput ?? "").normalize("NFC");
+  const positions = normalizedIndexToRawIndex(raw);
+  let rawCursor = 0;
+
+  parsed.tokens.forEach((item) => {
+    const rawStart = positions[item.start];
+    const rawEnd = positions[item.end - 1];
+
+    if (rawStart === undefined || rawEnd === undefined) {
+      highlight.append(createTokenChip(item, item.raw));
+      return;
+    }
+
+    if (rawCursor < rawStart) {
+      highlight.append(document.createTextNode(raw.slice(rawCursor, rawStart)));
+    }
+
+    highlight.append(createTokenChip(item, raw.slice(rawStart, rawEnd + 1)));
+    rawCursor = rawEnd + 1;
+  });
+
+  if (rawCursor < raw.length) {
+    highlight.append(document.createTextNode(raw.slice(rawCursor)));
+  }
+}
+
+/**
+ * Создаёт массив соответствия индексов нормализованной строки индексам исходной.
+ *
+ * @param {string} raw - Исходная строка в NFC.
+ * @returns {Array<number>} Позиции не-пробельных символов в исходной строке.
+ */
+function normalizedIndexToRawIndex(raw) {
+  const positions = [];
+  for (let index = 0; index < raw.length; index += 1) {
+    if (!isIgnoredForParsing(raw[index])) {
+      positions.push(index);
+    }
+  }
+  return positions;
+}
+
+/**
+ * Проверяет, удаляется ли символ при нормализации машинного разбора.
+ *
+ * @param {string} char - Один символ исходного ввода.
+ * @returns {boolean} true, если символ не должен занимать индекс токена.
+ */
+function isIgnoredForParsing(char) {
+  return /[\s\u00ad\u200b-\u200d\u2060\ufeff]/u.test(char);
+}
+
+/**
+ * Создаёт кликабельный токен подсветки.
+ *
+ * @param {object} item - Токен.
+ * @param {string} text - Текст токена в исходной строке.
+ * @returns {HTMLElement} HTML-элемент токена.
+ */
+function createTokenChip(item, text) {
+  const span = document.createElement("span");
+  span.className = `token-chip token-${item.type}`;
+  if (isSelected(item)) {
+    span.classList.add("is-selected");
+  }
+  span.textContent = text;
+  span.title = `${item.typeLabel}: ${item.label ?? "без подписи"}`;
+  span.role = "button";
+  span.tabIndex = 0;
+  span.addEventListener("click", () => selectToken(item));
+  span.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectToken(item);
+    }
+  });
+  return span;
+}
+
+/**
+ * Создаёт короткий фрагмент, который должен отображаться шрифтом РЖЯ.
+ * Обычный русский текст в соседних узлах остаётся системным шрифтом.
+ *
+ * @param {string} text - RSL-код, который нужно показать шрифтом РЖЯ.
+ * @param {string} extraClass - Дополнительный CSS-класс.
+ * @returns {HTMLElement} Элемент с применённым RSL-шрифтом.
+ */
+function makeRslInline(text, extraClass = "") {
+  const code = document.createElement("code");
+  code.className = ["rsl-inline", extraClass].filter(Boolean).join(" ");
+  code.textContent = String(text ?? "");
+  return code;
+}
+
+/**
+ * Добавляет смешанный текст: обычные слова остаются обычным шрифтом, а
+ * короткие RSL-фрагменты внутри кавычек «...» отображаются шрифтом РЖЯ.
+ * Русские цитаты вроде «контакт» или «простая запись» не трогаются.
+ *
+ * @param {HTMLElement} parent - Узел, куда добавляется текст.
+ * @param {string} text - Текст с возможными RSL-фрагментами в кавычках.
+ */
+function appendMixedLabel(parent, text) {
+  const source = String(text ?? "");
+  const pattern = /«([^»]+)»/gu;
+  let cursor = 0;
+  let match = pattern.exec(source);
+
+  while (match) {
+    const beforeQuote = source.slice(cursor, match.index);
+    const quoted = match[1];
+    parent.append(document.createTextNode(beforeQuote));
+
+    if (isLikelyRslFragment(quoted)) {
+      parent.append(document.createTextNode("«"));
+      parent.append(makeRslInline(quoted, "in-text"));
+      parent.append(document.createTextNode("»"));
+    } else {
+      parent.append(document.createTextNode(`«${quoted}»`));
+    }
+
+    cursor = pattern.lastIndex;
+    match = pattern.exec(source);
+  }
+
+  if (cursor < source.length) {
+    parent.append(document.createTextNode(source.slice(cursor)));
+  }
+}
+
+/**
+ * Отличает короткий код Шрифта РЖЯ от обычной русской цитаты.
+ *
+ * @param {string} value - Текст внутри кавычек.
+ * @returns {boolean} true, если фрагмент стоит показать RSL-шрифтом.
+ */
+function isLikelyRslFragment(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return false;
+  }
+
+  if (/[0-9._\\/%=":(){};!*+?\-|]/u.test(text)) {
+    return true;
+  }
+
+  if (text.length <= 4 && /^[ЁЭЖЙЦЬБЮЗЩДЪХ]+$/u.test(text)) {
+    return true;
+  }
+
+  if (text.length === 1 && /^[А-Яа-яЁё]$/u.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Добавляет текстовое объяснение из сегментов semantic layer.
+ *
+ * @param {HTMLElement} parent - Контейнер для объяснения.
+ * @param {Array<object>} segments - Сегменты вида { text } или { rsl }.
+ */
+function appendExplanationSegments(parent, segments) {
+  (segments ?? []).forEach((segment) => {
+    if (segment.rsl !== undefined) {
+      parent.append(makeRslInline(segment.rsl, "in-text"));
+    } else {
+      appendMixedLabel(parent, segment.text ?? "");
+    }
+  });
+}
+
+/**
+ * Выбирает токен и обновляет панели, где есть подсветка выбранного элемента.
+ *
+ * @param {object} item - Токен.
+ */
+function selectToken(item) {
+  selectedTokenKey = tokenKey(item);
+  renderHighlight(lastParsed);
+  renderSelection(lastParsed);
+  renderTree(lastParsed);
+  renderTokenTable(lastParsed.tokens);
+}
