@@ -737,3 +737,323 @@ function describeOrientation(raw, finger, thumb) {
   return `ориентация «${raw}»: ${fingerLabel} + ${thumbLabel}`;
 }
 
+/**
+ * Разбивает поток токенов на кадры, таймлайны и префиксные немануальные блоки.
+ *
+ * @param {Array<object>} tokens - Токены.
+ * @returns {Array<object>} Иерархические единицы разбора.
+ */
+function buildUnits(tokens) {
+  const units = [];
+  let frameBuffer = [];
+  let timelineBuffer = [];
+  let frameCount = 0;
+  let timelineCount = 0;
+  let nonmanualCount = 0;
+
+  const flushFrame = () => {
+    if (frameBuffer.length === 0) {
+      return;
+    }
+    frameCount += 1;
+    units.push(makeFrame(frameBuffer, frameCount));
+    frameBuffer = [];
+  };
+
+  const flushTimeline = () => {
+    if (timelineBuffer.length === 0) {
+      return;
+    }
+    timelineCount += 1;
+    units.push(makeTimeline(timelineBuffer, timelineCount));
+    timelineBuffer = [];
+  };
+
+  for (const originalToken of tokens) {
+    let current = originalToken;
+
+    if (current.type === "ambiguous_contact_modifier") {
+      current = interpretAmbiguousToken(current, timelineBuffer.length > 0);
+    }
+
+    if (nonManualUnitTypes.has(current.type)) {
+      flushFrame();
+      flushTimeline();
+      nonmanualCount += 1;
+      units.push(makeNonmanualUnit(current, nonmanualCount));
+      continue;
+    }
+
+    if (timelineTypes.has(current.type)) {
+      flushFrame();
+      timelineBuffer.push(current);
+      continue;
+    }
+
+    flushTimeline();
+    frameBuffer.push(current);
+  }
+
+  flushFrame();
+  flushTimeline();
+  annotateFrameCarryOver(units);
+  return units;
+}
+
+/**
+ * Помечает сокращённые кадры, где конфигурация руки не повторяется.
+ *
+ * По справке, при переходе к следующему кадру можно не дублировать компонент,
+ * который не изменился. Поэтому кадр только с новой локализацией или только с
+ * новой ориентацией не считается автоматической ошибкой: парсер сохраняет
+ * явное предупреждение, но добавляет чтение «руки наследуются из предыдущего
+ * кадра».
+ *
+ * @param {Array<object>} units - Единицы разбора.
+ */
+function annotateFrameCarryOver(units) {
+  let previousFrame = null;
+
+  units.forEach((unit) => {
+    if (unit.kind !== "frame") {
+      return;
+    }
+
+    unit.effectiveHands = unit.hands;
+    unit.carryOver = null;
+
+    if (previousFrame) {
+      const previousHands = previousFrame.effectiveHands?.length > 0
+        ? previousFrame.effectiveHands
+        : previousFrame.hands;
+      const hasFrameContent = unit.locations.length > 0 || unit.contacts.length > 0 || unit.groups.length > 0;
+
+      if (unit.hands.length === 0 && previousHands.length > 0 && hasFrameContent) {
+        unit.effectiveHands = previousHands.map((hand) => makeInheritedHand(hand, null));
+        unit.carryOver = makeCarryOverNote(previousFrame, previousHands, "конфигурации и ориентации рук не записаны заново");
+        appendCarryOverComponent(unit);
+      } else if (unit.hands.some((hand) => !hand.handshape) && previousHands.length > 0) {
+        const mergedHands = unit.hands.map((hand, index) => makeInheritedHand(previousHands[index], hand));
+        const inheritedSomething = mergedHands.some((hand) => hand.inheritedHandshape || hand.inheritedOrientation);
+        if (inheritedSomething) {
+          unit.effectiveHands = mergedHands;
+          unit.carryOver = makeCarryOverNote(previousFrame, previousHands, "часть описания руки не записана заново");
+          appendCarryOverComponent(unit);
+        }
+      }
+    }
+
+    previousFrame = unit;
+  });
+}
+
+/**
+ * Создаёт руку с унаследованными недостающими параметрами.
+ *
+ * @param {object|null} previousHand - Соответствующая рука из предыдущего кадра.
+ * @param {object|null} currentHand - Рука из текущего кадра.
+ * @returns {object} Эффективная рука для сокращённого кадра.
+ */
+function makeInheritedHand(previousHand, currentHand) {
+  if (!previousHand && currentHand) {
+    return currentHand;
+  }
+  if (!currentHand) {
+    return {
+      ...previousHand,
+      inherited: true,
+      inheritedHandshape: Boolean(previousHand?.handshape),
+      inheritedOrientation: Boolean(previousHand?.orientation)
+    };
+  }
+
+  const handshape = currentHand.handshape ?? previousHand?.handshape ?? null;
+  const orientation = currentHand.orientation ?? previousHand?.orientation ?? null;
+  const labelParts = [];
+  if (orientation) {
+    labelParts.push(orientation.label);
+  }
+  if (handshape) {
+    labelParts.push(handshape.label);
+  }
+  return {
+    ...currentHand,
+    handshape,
+    orientation,
+    inherited: true,
+    inheritedHandshape: !currentHand.handshape && Boolean(previousHand?.handshape),
+    inheritedOrientation: !currentHand.orientation && Boolean(previousHand?.orientation),
+    label: labelParts.join("; ") || currentHand.label
+  };
+}
+
+/**
+ * Создаёт текстовую заметку о наследовании рук.
+ *
+ * @param {object} previousFrame - Предыдущий кадр.
+ * @param {Array<object>} previousHands - Руки, которые наследуются.
+ * @param {string} reason - Причина заметки.
+ * @returns {object} Заметка.
+ */
+function makeCarryOverNote(previousFrame, previousHands, reason) {
+  return {
+    sourceFrame: previousFrame.title,
+    sourceRaw: previousFrame.raw,
+    inheritedHandsRaw: previousHands.map((hand) => hand.raw).filter(Boolean),
+    reason,
+    message: `${reason}; читается как продолжение ${previousFrame.title}`
+  };
+}
+
+/**
+ * Добавляет заметку о сокращении в дерево разбора.
+ *
+ * @param {object} frame - Кадр.
+ */
+function appendCarryOverComponent(frame) {
+  const inherited = frame.carryOver?.inheritedHandsRaw ?? [];
+  const inheritedText = inherited.length > 0
+    ? ` Сохраняются руки из ${frame.carryOver.sourceFrame}: ${inherited.map((raw) => `«${raw}»`).join(", ")}.`
+    : "";
+  frame.components.push({
+    role: "сокращение кадра",
+    raw: "",
+    label: `${frame.carryOver.message}.${inheritedText}`,
+    token: null
+  });
+}
+
+/**
+ * В контексте кадра читает !/; как контакт, а в таймлайне как модификатор.
+ *
+ * @param {object} ambiguousToken - Неоднозначный токен.
+ * @param {boolean} timelineContext - Находимся ли уже внутри таймлайна.
+ * @returns {object} Токен с выбранной интерпретацией.
+ */
+function interpretAmbiguousToken(ambiguousToken, timelineContext) {
+  const chosenType = timelineContext ? "movement_modifier" : "contact";
+  const dictionary = timelineContext ? MOVEMENT_MODIFIERS : CONTACTS;
+  return {
+    ...ambiguousToken,
+    type: chosenType,
+    typeLabel: TYPE_LABELS[chosenType],
+    label: dictionary[ambiguousToken.raw]?.label ?? ambiguousToken.label,
+    interpretedFrom: "ambiguous_contact_modifier",
+    interpretationReason: timelineContext
+      ? "стоит внутри таймлайна после движения"
+      : "стоит внутри кадра или до явного движения"
+  };
+}
+
+/**
+ * Создаёт узел немануального компонента.
+ *
+ * @param {object} item - Токен.
+ * @param {number} index - Номер узла.
+ * @returns {object} Узел разбора.
+ */
+function makeNonmanualUnit(item, index) {
+  return {
+    kind: "nonmanual",
+    title: `Немануальный компонент ${index}`,
+    raw: item.raw,
+    tokens: [item],
+    components: [
+      {
+        role: item.typeLabel,
+        raw: item.raw,
+        label: item.label,
+        token: item
+      }
+    ]
+  };
+}
+
+/**
+ * Создаёт кадр и группирует в нём руку/руки, локализации и контакты.
+ *
+ * @param {Array<object>} frameTokens - Токены кадра.
+ * @param {number} index - Номер кадра.
+ * @returns {object} Кадр.
+ */
+function makeFrame(frameTokens, index) {
+  const locations = frameTokens.filter((item) => ["location", "relative_location", "locus"].includes(item.type));
+  const contacts = frameTokens.filter((item) => item.type === "contact");
+  const groups = frameTokens.filter((item) => item.type === "group_unknown");
+  const handTokens = frameTokens.filter((item) => ["handshape", "orientation", "orientation_part"].includes(item.type));
+  const hands = extractHands(handTokens);
+  const otherTokens = frameTokens.filter((item) => ![
+    "location",
+    "relative_location",
+    "locus",
+    "contact",
+    "handshape",
+    "orientation",
+    "orientation_part",
+    "group_unknown"
+  ].includes(item.type));
+
+  return {
+    kind: "frame",
+    title: `Кадр ${index}`,
+    raw: frameTokens.map((item) => item.raw).join(""),
+    tokens: frameTokens,
+    locations,
+    contacts,
+    groups,
+    hands,
+    otherTokens,
+    components: buildFrameComponents(locations, contacts, groups, hands, otherTokens)
+  };
+}
+
+/**
+ * Создаёт таймлайн.
+ *
+ * @param {Array<object>} timelineTokens - Токены таймлайна.
+ * @param {number} index - Номер таймлайна.
+ * @returns {object} Таймлайн.
+ */
+function makeTimeline(timelineTokens, index) {
+  const plane = timelineTokens.find((item) => item.type === "plane") ?? null;
+  timelineTokens.forEach((item) => {
+    const contextualLabel = getContextualTimelineLabel(item, plane);
+    if (contextualLabel && contextualLabel !== item.label) {
+      item.contextualLabel = contextualLabel;
+    }
+  });
+  return {
+    kind: "timeline",
+    title: `Таймлайн ${index}`,
+    raw: timelineTokens.map((item) => item.raw).join(""),
+    tokens: timelineTokens,
+    movements: timelineTokens.filter((item) => ["movement", "circular_movement"].includes(item.type)),
+    modifiers: timelineTokens.filter((item) => ["movement_modifier", "plane"].includes(item.type)),
+    nonDominant: timelineTokens.filter((item) => item.type === "non_dominant_movement"),
+    components: timelineTokens.map((item) => ({
+      role: item.typeLabel,
+      raw: item.raw,
+      label: getContextualTimelineLabel(item, plane),
+      token: item
+    }))
+  };
+}
+
+function getContextualTimelineLabel(token, plane) {
+  if (token.type !== "movement" && token.type !== "circular_movement") {
+    return token.label;
+  }
+
+  const direction = token.type === "circular_movement" ? token.direction : token.raw;
+  const contextual = direction && plane ? DIAGONAL_MOVEMENTS_BY_PLANE[plane.raw]?.[direction] : null;
+  if (!contextual) {
+    return token.label;
+  }
+
+  if (token.type === "circular_movement") {
+    return `круговое движение, уточнение: ${contextual.label}`;
+  }
+
+  return contextual.label;
+}
+
