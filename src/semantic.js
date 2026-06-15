@@ -193,3 +193,412 @@ const SIMPLE_TIMELINE_TYPES = new Set([
   "plane"
 ]);
 
+/**
+ * Строит бета-семантику для простых записей.
+ *
+ * @param {object} parsed - Результат parseSign().
+ * @returns {object} Слой со структурой и текстовым объяснением.
+ */
+export function buildSemanticLayer(parsed) {
+  const reasons = findUnsupportedReasons(parsed);
+  if (reasons.length > 0) {
+    return {
+      beta: true,
+      supported: false,
+      status: "unsupported",
+      title: "Текстовое описание пока не поддерживается",
+      unsupportedReasons: [...new Set(reasons)],
+      semantic: null,
+      explanation: "Смысловое описание пока не построено: " + [...new Set(reasons)].join("; ") + ".",
+      explanationSegments: [
+        { text: "Смысловое описание пока не построено: " },
+        { text: [...new Set(reasons)].join("; ") + "." }
+      ]
+    };
+  }
+
+  const frame = parsed.frames[0] ?? null;
+  const timeline = parsed.timelines[0] ?? null;
+  const nonmanual = parsed.nonmanualUnits[0] ?? null;
+  const semantic = {
+    type: "simple-sign",
+    raw: parsed.normalized,
+    nonmanual: nonmanual ? nonmanualToSemantic(nonmanual) : null,
+    frame: frameToSemantic(frame),
+    timeline: timeline ? timelineToSemantic(timeline) : null
+  };
+  const explanationSegments = buildExplanationSegments(semantic);
+
+  return {
+    beta: true,
+    supported: true,
+    status: "supported",
+    title: "Текстовое описание простого паттерна",
+    unsupportedReasons: [],
+    semantic,
+    explanation: segmentsToPlainText(explanationSegments),
+    explanationSegments
+  };
+}
+
+function findUnsupportedReasons(parsed) {
+  const reasons = [];
+  if (!parsed || parsed.normalized.length === 0) {
+    reasons.push("нет записи для описания");
+    return reasons;
+  }
+  if (parsed.summary.errorCount > 0) {
+    reasons.push("в записи есть ошибки валидатора");
+  }
+  if (parsed.components.unknown.length > 0) {
+    reasons.push("есть неизвестные или не полностью распознанные группы");
+  }
+  if (parsed.components.orientationParts.length > 0) {
+    reasons.push("есть неполная ориентация");
+  }
+  if (parsed.frames.length !== 1) {
+    reasons.push("поддерживается ровно один кадр");
+  }
+  if (parsed.timelines.length > 1) {
+    reasons.push("поддерживается не больше одного таймлайна");
+  }
+  if (parsed.nonmanualUnits.length > 1) {
+    reasons.push("поддерживается не больше одного немануального блока");
+  }
+
+  const frame = parsed.frames[0];
+  if (frame) {
+    if (frame.groups.length > 0 || frame.otherTokens.length > 0) {
+      reasons.push("кадр содержит служебные или неразобранные элементы");
+    }
+    if (frame.locations.length > 1) {
+      reasons.push("в кадре больше одной локализации");
+    }
+    if (frame.contacts.length > 2) {
+      reasons.push("в кадре больше двух контактов");
+    }
+    if (frame.hands.length === 0 && frame.locations.length === 0) {
+      reasons.push("в кадре нет руки и локализации");
+    }
+    if (frame.hands.length > 2) {
+      reasons.push("в кадре больше двух рук");
+    }
+    if (frame.hands.some((hand) => !hand.handshape)) {
+      reasons.push("есть рука без конфигурации");
+    }
+  }
+
+  const timeline = parsed.timelines[0];
+  if (timeline) {
+    if (timeline.tokens.some((token) => !SIMPLE_TIMELINE_TYPES.has(token.type))) {
+      reasons.push("таймлайн содержит сложный тип движения");
+    }
+    const movementDirections = timeline.movements
+      .filter((token) => token.type === "movement")
+      .map((token) => token.raw);
+    const distinctDirections = new Set(movementDirections);
+    if (distinctDirections.size > 1) {
+      reasons.push("таймлайн содержит несколько разных направлений движения");
+    }
+    if (timeline.movements.filter((token) => token.type === "circular_movement").length > 1) {
+      reasons.push("таймлайн содержит несколько круговых движений");
+    }
+  }
+
+  return reasons;
+}
+
+function frameToSemantic(frame) {
+  const locationToken = frame.locations[0] ?? null;
+  const contacts = summarizeContacts(frame.contacts);
+  const hands = frame.effectiveHands?.length > 0 ? frame.effectiveHands : frame.hands;
+  return {
+    type: "frame",
+    raw: frame.raw,
+    location: locationToken ? locationToSemantic(locationToken) : null,
+    contact: contacts,
+    dominantHand: hands[0] ? handToSemantic(hands[0], "dominantHand", "ведущая рука") : null,
+    nonDominantHand: hands[1] ? handToSemantic(hands[1], "nonDominantHand", "неведущая рука") : null,
+    carriedOverHands: frame.carryOver ?? null
+  };
+}
+
+function locationToSemantic(token) {
+  const phrase = LOCATION_PHRASES[token.raw] ?? makeLocationFallback(token);
+  return {
+    raw: token.raw,
+    type: token.type,
+    name: phrase.name,
+    where: phrase.where,
+    genitive: phrase.genitive,
+    contactTarget: phrase.genitive ?? phrase.name,
+    subtype: token.subtype ?? null
+  };
+}
+
+function makeLocationFallback(token) {
+  const name = token.label ?? LOCATIONS[token.raw]?.label ?? "локализация";
+  if (token.subtype?.includes("кисть")) {
+    return { name, where: `у области «${token.raw}» на неведущей руке`, genitive: name };
+  }
+  if (token.type === "relative_location") {
+    return { name, where: token.label ?? "относительно неведущей руки", genitive: name };
+  }
+  if (token.type === "locus") {
+    return { name, where: `в пространственной точке: ${name}`, genitive: name };
+  }
+  return { name, where: `у области: ${name}`, genitive: name };
+}
+
+function summarizeContacts(contactTokens) {
+  if (contactTokens.length === 0) {
+    return null;
+  }
+  const raw = contactTokens.map((token) => token.raw).join("");
+  const first = contactTokens[0].raw;
+  const phrase = CONTACT_PHRASES[first] ?? CONTACT_PHRASES["*"];
+  const repeated = contactTokens.length > 1;
+  return {
+    raw,
+    primary: first,
+    count: contactTokens.length,
+    name: repeated ? `${phrase.name}, повтор ${contactTokens.length} раза` : phrase.name,
+    verbSingle: repeated ? phrase.repeatedAction : phrase.action,
+    verbPlural: phrase.verbPlural,
+    tokens: contactTokens.map((token) => ({ raw: token.raw, label: CONTACTS[token.raw]?.label ?? token.label }))
+  };
+}
+
+function handToSemantic(hand, key, label) {
+  return {
+    type: key,
+    role: label,
+    raw: hand.raw,
+    inherited: hand.inherited || false,
+    inheritedHandshape: hand.inheritedHandshape || false,
+    inheritedOrientation: hand.inheritedOrientation || false,
+    handshape: hand.handshape
+      ? {
+        raw: hand.handshape.raw,
+        name: `конфигурация «${hand.handshape.raw}»`,
+        phrase: "в конфигурации"
+      }
+      : null,
+    orientation: hand.orientation
+      ? {
+        raw: hand.orientation.raw,
+        name: `ориентация «${hand.orientation.raw}»`,
+        finger: hand.orientation.finger,
+        thumb: hand.orientation.thumb,
+        summary: describeOrientationForUser(hand.orientation)
+      }
+      : null
+  };
+}
+
+function timelineToSemantic(timeline) {
+  const plane = timeline.modifiers.find((token) => token.type === "plane") ?? null;
+  const movements = timeline.movements.map((token) => movementToSemantic(token, plane));
+  const modifiers = timeline.modifiers.map((token) => ({
+    raw: token.raw,
+    type: token.type,
+    name: MOVEMENT_MODIFIERS[token.raw]?.label ?? token.label
+  }));
+  const nonDominant = timeline.nonDominant.map((token) => ({
+    raw: token.raw,
+    name: NON_DOMINANT_MOVEMENTS[token.raw]?.label ?? token.label
+  }));
+  return {
+    type: "timeline",
+    raw: timeline.raw,
+    plane: plane ? { raw: plane.raw, name: PLANE_NAMES[plane.raw] ?? plane.label } : null,
+    movements,
+    modifiers,
+    nonDominant
+  };
+}
+
+function movementToSemantic(token, plane = null) {
+  if (token.type === "circular_movement") {
+    const direction = token.direction ? readMovementDirection(token.direction, plane) : null;
+    const directionText = direction?.phrase?.replace(/^движется\s+/u, "") ?? direction?.direction;
+    return {
+      raw: token.raw,
+      type: token.type,
+      name: token.label ?? "круговое движение",
+      phrase: directionText
+        ? `совершает круговое движение; направление уточнено: ${directionText}`
+        : "совершает круговое движение"
+    };
+  }
+  const phrase = readMovementDirection(token.raw, plane);
+  return {
+    raw: token.raw,
+    type: token.type,
+    name: `движение ${phrase.direction}`,
+    direction: phrase.direction,
+    phrase: phrase.phrase
+  };
+}
+
+function readMovementDirection(raw, plane = null) {
+  const planeDirections = plane ? DIAGONAL_MOVEMENTS_BY_PLANE[plane.raw] : null;
+  if (planeDirections?.[raw]) {
+    return {
+      direction: planeDirections[raw].label,
+      phrase: planeDirections[raw].phrase
+    };
+  }
+  if (MOVEMENT_PHRASES[raw]) {
+    return MOVEMENT_PHRASES[raw];
+  }
+  if (raw === "Щ" || raw === "\\") {
+    return {
+      direction: "по диагонали; плоскость не уточнена",
+      phrase: "движется по диагонали, но без явного указания плоскости"
+    };
+  }
+  return {
+    direction: DIRECTIONS[raw]?.label ?? "в указанном направлении",
+    phrase: `движется ${DIRECTIONS[raw]?.label ?? "в указанном направлении"}`
+  };
+}
+
+function describeOrientationForUser(orientation) {
+  const reading = ORIENTATION_READINGS[orientation.raw];
+  if (reading) {
+    return reading;
+  }
+}
+
+function nonmanualToSemantic(unit) {
+  const token = unit.tokens[0];
+  return {
+    raw: token.raw,
+    name: NONMANUALS[token.raw]?.label ?? token.label ?? "немануальный компонент"
+  };
+}
+
+function buildExplanationSegments(semantic) {
+  const segments = [];
+  if (semantic.nonmanual) {
+    pushText(segments, "Перед жестом указан немануальный компонент ");
+    pushRsl(segments, semantic.nonmanual.raw);
+    pushText(segments, ` (${semantic.nonmanual.name}). `);
+  }
+
+  const frame = semantic.frame;
+  const hand1 = frame.dominantHand;
+  const hand2 = frame.nonDominantHand;
+
+  pushText(segments, "В кадре ");
+  if (hand1 && hand2) {
+    describeHand(segments, hand1, "ведущая рука");
+    pushText(segments, ", а ");
+    describeHand(segments, hand2, "неведущая рука");
+    if (frame.contact) {
+      pushText(segments, `; руки ${frame.contact.verbPlural}`);
+    }
+    if (frame.location) {
+      pushText(segments, ` ${frame.location.where}`);
+    }
+    pushText(segments, ".");
+  } else if (hand1) {
+    describeHand(segments, hand1, "ведущая рука");
+    if (frame.contact && frame.location) {
+      pushText(segments, ` ${formatContactWithLocation(frame.contact, frame.location)}`);
+    } else if (frame.location) {
+      pushText(segments, ` расположена ${frame.location.where}`);
+    } else if (frame.contact) {
+      pushText(segments, ` выполняет контакт: ${frame.contact.name}`);
+    }
+    pushText(segments, ".");
+  } else if (frame.location) {
+    pushText(segments, `указана локализация ${frame.location.where}.`);
+  }
+
+  if (semantic.timeline) {
+    pushText(segments, " После этого ");
+    appendTimelineDescription(segments, semantic.timeline);
+    pushText(segments, ".");
+  }
+
+  return segments;
+}
+
+function formatContactWithLocation(contact, location) {
+  const target = location.genitive ?? location.name;
+  return `${contact.verbSingle} ${target}`;
+}
+
+function describeHand(segments, hand, roleText) {
+  pushText(segments, `${roleText} `);
+  if (hand.handshape) {
+    pushText(segments, "в конфигурации ");
+    pushRsl(segments, hand.handshape.raw);
+  }
+  if (hand.orientation) {
+    pushText(segments, " с ориентацией ");
+    pushRsl(segments, hand.orientation.raw);
+    if (hand.orientation.summary) {
+      pushText(segments, ` (${hand.orientation.summary})`);
+    }
+  }
+}
+
+function appendTimelineDescription(segments, timeline) {
+  const linearMovements = timeline.movements.filter((item) => item.type === "movement");
+  const circularMovements = timeline.movements.filter((item) => item.type === "circular_movement");
+  const visibleModifiers = timeline.modifiers.filter((item) => item.type !== "plane");
+
+  if (linearMovements.length > 0) {
+    const first = linearMovements[0];
+    pushText(segments, `ведущая рука ${first.phrase}`);
+    if (linearMovements.length > 1) {
+      pushText(segments, ` ${countPhrase(linearMovements.length)}`);
+    }
+  } else if (circularMovements.length > 0) {
+    pushText(segments, `ведущая рука ${circularMovements[0].phrase}`);
+  } else {
+    pushText(segments, "движение ведущей руки явно не задано");
+  }
+
+  if (visibleModifiers.length > 0) {
+    pushText(segments, `; модификатор: ${visibleModifiers.map((item) => item.name).join(", ")}`);
+  }
+  if (timeline.nonDominant.length > 0) {
+    pushText(segments, `; ${timeline.nonDominant.map((item) => item.name).join(", ")}`);
+  }
+}
+
+function countPhrase(count) {
+  if (count === 2) {
+    return "два раза";
+  }
+  if (count === 3) {
+    return "три раза";
+  }
+  return `${count} раз(а)`;
+}
+
+function pushText(segments, text) {
+  if (!text) {
+    return;
+  }
+  const previous = segments[segments.length - 1];
+  if (previous?.text !== undefined) {
+    previous.text += text;
+  } else {
+    segments.push({ text });
+  }
+}
+
+function pushRsl(segments, rsl) {
+  if (rsl) {
+    segments.push({ rsl });
+  }
+}
+
+function segmentsToPlainText(segments) {
+  return segments.map((segment) => segment.text ?? segment.rsl ?? "").join("");
+}
