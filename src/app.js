@@ -630,3 +630,317 @@ function renderSequences(parsed) {
 }
 
 /**
+ * Рисует таблицу токенов.
+ *
+ * @param {Array<object>} tokens - Токены.
+ */
+function renderTokenTable(tokens) {
+  tokenTable.replaceChildren();
+  if (tokens.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 3;
+    cell.textContent = "Нет токенов.";
+    row.append(cell);
+    tokenTable.append(row);
+    return;
+  }
+
+  tokens.forEach((item) => {
+    const row = document.createElement("tr");
+    row.className = isSelected(item) ? "is-selected-row" : "";
+    row.addEventListener("click", () => selectToken(item));
+    [
+      { value: item.raw, rsl: true },
+      { value: item.typeLabel },
+      { value: getDisplayedTokenLabel(item) ?? "—", mixed: true }
+    ].forEach((cellData) => {
+      const cell = document.createElement("td");
+      if (cellData.rsl) {
+        cell.append(makeRslInline(cellData.value));
+      } else if (cellData.mixed) {
+        appendMixedLabel(cell, cellData.value);
+      } else {
+        cell.textContent = cellData.value;
+      }
+      row.append(cell);
+    });
+    tokenTable.append(row);
+  });
+}
+
+function getDisplayedTokenLabel(token) {
+  return token?.contextualLabel ?? token?.label ?? null;
+}
+
+/**
+ * Форматирует компактный JSON для панели и кнопки копирования.
+ *
+ * @param {object} parsed - Полный внутренний разбор.
+ * @returns {string} JSON без повторяющихся ссылок на токены.
+ */
+function formatCompactJson(parsed) {
+  return JSON.stringify(compactParsedForExport(parsed), null, 2);
+}
+
+/**
+ * Сжимает внутренний объект парсера до формата, удобного для показа.
+ *
+ * @param {object} parsed - Полный внутренний разбор.
+ * @returns {object} Компактный экспортируемый разбор.
+ */
+function compactParsedForExport(parsed) {
+  return {
+    rawInput: parsed.rawInput,
+    normalized: parsed.normalized,
+    exactGloss: parsed.exactGloss,
+    summary: parsed.summary,
+    semanticLayer: compactSemanticLayer(parsed.semanticLayer),
+    tokens: parsed.tokens.map(compactToken),
+    units: parsed.units.map(compactUnit),
+    diagnostics: parsed.diagnostics.map(compactDiagnostic),
+    possibleSequences: parsed.possibleSequences.map(compactPossibleSequence)
+  };
+}
+
+/**
+ * Сжимает токен до стабильного набора полей.
+ *
+ * @param {object} item - Токен парсера.
+ * @returns {object} Компактный токен.
+ */
+function compactToken(item) {
+  if (!item) {
+    return null;
+  }
+  const result = {
+    type: item.type,
+    typeLabel: item.typeLabel,
+    raw: item.raw,
+    label: item.label ?? null,
+    start: item.start,
+    end: item.end
+  };
+  ["subtype", "recognizer", "severity", "axis", "direction", "handshape", "interpretedFrom", "interpretationReason", "syllable", "repeatCount", "parts", "contextualLabel"].forEach((key) => {
+    if (item[key] !== undefined) {
+      result[key] = item[key];
+    }
+  });
+  if (item.candidates) {
+    result.candidates = item.candidates.map((candidate) => ({
+      type: candidate.type,
+      label: candidate.label
+    }));
+  }
+  return result;
+}
+
+/**
+ * Сжимает единицу дерева разбора.
+ *
+ * @param {object} unit - Кадр, таймлайн или немануальный блок.
+ * @returns {object} Компактная единица.
+ */
+function compactUnit(unit) {
+  const result = {
+    kind: unit.kind,
+    title: unit.title,
+    raw: unit.raw,
+    tokens: (unit.tokens ?? []).map(compactToken),
+    components: (unit.components ?? []).map(compactComponent)
+  };
+
+  if (unit.kind === "frame") {
+    result.locations = unit.locations.map(compactToken);
+    result.contacts = unit.contacts.map(compactToken);
+    result.hands = unit.hands.map(compactHand);
+    result.effectiveHands = (unit.effectiveHands ?? unit.hands).map(compactHand);
+    result.carryOver = unit.carryOver ?? null;
+  }
+
+  if (unit.kind === "timeline") {
+    result.movements = unit.movements.map(compactToken);
+    result.modifiers = unit.modifiers.map(compactToken);
+    result.nonDominant = unit.nonDominant.map(compactToken);
+  }
+
+  return result;
+}
+/**
+ * Сжимает описание руки внутри кадра.
+ *
+ * @param {object} hand - Рука из frame.hands или frame.effectiveHands.
+ * @returns {object|null} Компактная рука.
+ */
+function compactHand(hand) {
+  if (!hand) {
+    return null;
+  }
+  return {
+    role: hand.role,
+    raw: hand.raw,
+    pattern: hand.pattern,
+    label: hand.label,
+    handshape: compactToken(hand.handshape),
+    orientation: compactToken(hand.orientation),
+    inherited: hand.inherited || undefined,
+    inheritedHandshape: hand.inheritedHandshape || undefined,
+    inheritedOrientation: hand.inheritedOrientation || undefined
+  };
+}
+
+/**
+ * Сжимает компонент дерева, убирая вложенный объект token.
+ *
+ * @param {object} component - Компонент дерева.
+ * @returns {object} Компактный компонент.
+ */
+function compactComponent(component) {
+  return {
+    role: component.role,
+    raw: component.raw,
+    label: component.label ?? null,
+    subtype: component.subtype ?? undefined,
+    tokenType: component.token?.type,
+    children: (component.children ?? []).map(compactComponent)
+  };
+}
+
+/**
+ * Сжимает диагностику валидатора.
+ *
+ * @param {object} item - Диагностика.
+ * @returns {object} Компактная диагностика.
+ */
+function compactDiagnostic(item) {
+  return {
+    severity: item.severity,
+    title: item.title,
+    message: item.message,
+    raw: item.token?.raw ?? item.unit?.raw ?? null,
+    tokenType: item.token?.type ?? null,
+    unitKind: item.unit?.kind ?? null
+  };
+}
+
+/**
+ * Оставляет в semantic layer только пользовательски полезные поля.
+ *
+ * @param {object} layer - Бета-семантика.
+ * @returns {object|null} Компактный слой.
+ */
+function compactSemanticLayer(layer) {
+  if (!layer) {
+    return null;
+  }
+  return {
+    beta: layer.beta,
+    supported: layer.supported,
+    status: layer.status,
+    title: layer.title,
+    unsupportedReasons: layer.unsupportedReasons,
+    explanation: layer.explanation,
+    semantic: layer.semantic
+  };
+}
+
+/**
+ * Сжимает вариант возможной последовательности.
+ *
+ * @param {object} sequence - Вариант последовательности.
+ * @returns {object} Компактный вариант.
+ */
+function compactPossibleSequence(sequence) {
+  return {
+    kind: sequence.kind,
+    label: sequence.label,
+    note: sequence.note,
+    units: (sequence.units ?? []).map((unit) => ({
+      kind: unit.kind,
+      title: unit.title,
+      raw: unit.raw,
+      components: (unit.components ?? []).map((component) => ({
+        role: component.role,
+        raw: component.raw,
+        label: component.label ?? null,
+        children: (component.children ?? []).map((child) => ({
+          role: child.role,
+          raw: child.raw,
+          label: child.label ?? null
+        }))
+      }))
+    }))
+  };
+}
+
+/**
+ * Возвращает стабильный ключ токена.
+ *
+ * @param {object} item - Токен.
+ * @returns {string} Ключ токена.
+ */
+function tokenKey(item) {
+  return `${item.start}:${item.end}:${item.raw}`;
+}
+
+/**
+ * Проверяет, выбран ли токен.
+ *
+ * @param {object} item - Токен.
+ * @returns {boolean} true, если токен выбран.
+ */
+function isSelected(item) {
+  return selectedTokenKey === tokenKey(item);
+}
+
+/**
+ * Находит выбранный токен в лексическом списке или в интерпретированных единицах.
+ *
+ * @param {object} parsed - Полный разбор.
+ * @returns {object|null} Токен или null.
+ */
+function findSelectedToken(parsed) {
+  if (!selectedTokenKey || !parsed) {
+    return null;
+  }
+  const candidates = [
+    ...parsed.tokens,
+    ...parsed.units.flatMap((unit) => unit.tokens ?? [])
+  ];
+  return candidates.find((item) => tokenKey(item) === selectedTokenKey) ?? null;
+}
+
+/**
+ * Копирует JSON-разбор в буфер обмена.
+ */
+async function copyJson() {
+  if (!lastParsed) {
+    return;
+  }
+  const json = formatCompactJson(lastParsed);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(json);
+    } else {
+      throw new Error("Clipboard API is not available");
+    }
+    copyJsonButton.textContent = "JSON скопирован";
+  } catch {
+    const helper = document.createElement("textarea");
+    helper.value = json;
+    helper.setAttribute("readonly", "");
+    helper.style.position = "fixed";
+    helper.style.left = "-9999px";
+    document.body.append(helper);
+    helper.select();
+    const ok = document.execCommand("copy");
+    helper.remove();
+    copyJsonButton.textContent = ok ? "JSON скопирован" : "Не удалось скопировать";
+  } finally {
+    setTimeout(() => {
+      copyJsonButton.textContent = "Скопировать JSON";
+    }, 1400);
+  }
+}
+
+init();
