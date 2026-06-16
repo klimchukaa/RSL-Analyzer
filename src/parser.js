@@ -1057,3 +1057,472 @@ function getContextualTimelineLabel(token, plane) {
   return contextual.label;
 }
 
+/**
+ * Собирает компоненты кадра для дерева интерфейса.
+ *
+ * @param {Array<object>} locations - Локализации.
+ * @param {Array<object>} contacts - Контакты.
+ * @param {Array<object>} groups - Нераспознанные группы.
+ * @param {Array<object>} hands - Руки.
+ * @param {Array<object>} otherTokens - Прочие токены.
+ * @returns {Array<object>} Компоненты кадра.
+ */
+function buildFrameComponents(locations, contacts, groups, hands, otherTokens) {
+  const components = [];
+  locations.forEach((item) => components.push({
+    role: item.typeLabel,
+    raw: item.raw,
+    label: item.label,
+    subtype: item.subtype,
+    token: item
+  }));
+  groups.forEach((item) => components.push({
+    role: item.typeLabel,
+    raw: item.raw,
+    label: item.label,
+    token: item
+  }));
+  contacts.forEach((item) => components.push({
+    role: item.typeLabel,
+    raw: item.raw,
+    label: item.label,
+    token: item
+  }));
+  hands.forEach((hand) => components.push({
+    role: hand.role,
+    raw: hand.raw,
+    label: hand.label,
+    children: hand.parts.map((part) => ({
+      role: part.typeLabel,
+      raw: part.raw,
+      label: part.label,
+      token: part
+    }))
+  }));
+  otherTokens.forEach((item) => components.push({
+    role: item.typeLabel,
+    raw: item.raw,
+    label: item.label,
+    token: item
+  }));
+  return components;
+}
+
+/**
+ * Группирует последовательность конфигураций и ориентаций в руки.
+ *
+ * @param {Array<object>} handTokens - Токены, относящиеся к форме/ориентации рук.
+ * @returns {Array<object>} Список рук.
+ */
+function extractHands(handTokens) {
+  const hands = [];
+  let index = 0;
+
+  while (index < handTokens.length) {
+    const current = handTokens[index];
+    const next = handTokens[index + 1];
+
+    if (current?.type === "orientation" && next?.type === "handshape") {
+      hands.push(makeHand([current, next], hands.length + 1, "orientation-handshape"));
+      index += 2;
+      continue;
+    }
+
+    if (current?.type === "handshape" && next?.type === "orientation") {
+      hands.push(makeHand([current, next], hands.length + 1, "handshape-orientation"));
+      index += 2;
+      continue;
+    }
+
+    hands.push(makeHand([current], hands.length + 1, current.type));
+    index += 1;
+  }
+
+  return hands;
+}
+
+/**
+ * Создаёт узел руки.
+ *
+ * @param {Array<object>} parts - Токены руки.
+ * @param {number} index - Номер руки в кадре.
+ * @param {string} pattern - Распознанный паттерн.
+ * @returns {object} Узел руки.
+ */
+function makeHand(parts, index, pattern) {
+  const handshape = parts.find((item) => item.type === "handshape") ?? null;
+  const orientation = parts.find((item) => item.type === "orientation") ?? null;
+  const role = index === 1 ? "рука 1" : `рука ${index}`;
+  const raw = parts.map((item) => item.raw).join("");
+  const labelParts = [];
+
+  if (orientation) {
+    labelParts.push(orientation.label);
+  }
+  if (handshape) {
+    labelParts.push(handshape.label);
+  }
+
+  return {
+    role,
+    raw,
+    pattern,
+    parts,
+    handshape,
+    orientation,
+    label: labelParts.join("; ") || "неполное описание руки"
+  };
+}
+
+/**
+ * Собирает удобные списки найденных компонентов для JSON и внешних тестов.
+ *
+ * @param {Array<object>} tokens - Лексические токены.
+ * @param {Array<object>} units - Иерархические единицы разбора.
+ * @returns {object} Компоненты, сгруппированные по лингвистическим ролям.
+ */
+function collectComponents(tokens, units) {
+  const interpretedTokens = units.flatMap((unit) => unit.tokens ?? []);
+  const locationTypes = new Set(["location", "relative_location", "locus"]);
+  const movementTypes = new Set([
+    "movement",
+    "circular_movement",
+    "non_dominant_movement",
+    "movement_modifier",
+    "plane"
+  ]);
+
+  return {
+    handshapes: interpretedTokens.filter((item) => item.type === "handshape"),
+    orientations: interpretedTokens.filter((item) => item.type === "orientation"),
+    orientationParts: interpretedTokens.filter((item) => item.type === "orientation_part"),
+    locations: interpretedTokens.filter((item) => locationTypes.has(item.type)),
+    contacts: interpretedTokens.filter((item) => item.type === "contact"),
+    movements: interpretedTokens.filter((item) => movementTypes.has(item.type)),
+    nonmanuals: interpretedTokens.filter((item) => nonManualUnitTypes.has(item.type)),
+    unknown: tokens.filter((item) => ["unknown", "group_unknown"].includes(item.type)),
+    suspicious: tokens.filter((item) => item.type === "orientation_part" || item.type === "ambiguous_contact_modifier")
+  };
+}
+
+/**
+ * Строит компактные варианты последовательности единиц разбора.
+ *
+ * Сейчас варианты возникают только из неоднозначных символов ! и ;, которые
+ * могут быть контактом в кадре или модификатором в таймлайне. Перечисляются
+ * только те варианты кадр/таймлайн, которые различает сам парсер, а не все
+ * возможные лингвистические чтения.
+ *
+ * @param {Array<object>} tokens - Лексические токены.
+ * @returns {Array<object>} Возможные последовательности кадр/таймлайн.
+ */
+function buildPossibleSequences(tokens) {
+  const ambiguousIndexes = tokens
+    .map((item, index) => item.type === "ambiguous_contact_modifier" ? index : -1)
+    .filter((index) => index !== -1);
+
+  if (ambiguousIndexes.length === 0) {
+    return [compactSequence("primary", "Основной разбор", buildUnits(tokens))];
+  }
+
+  if (ambiguousIndexes.length > 8) {
+    return [
+      compactSequence("primary", "Основной разбор", buildUnits(tokens)),
+      {
+        kind: "too_many_ambiguities",
+        label: "Слишком много неоднозначных символов",
+        note: "Парсер не перечисляет все комбинации, чтобы не перегружать интерфейс.",
+        ambiguousCount: ambiguousIndexes.length
+      }
+    ];
+  }
+
+  const variants = [];
+  const seen = new Set();
+  const choiceCount = 2 ** ambiguousIndexes.length;
+
+  for (let mask = 0; mask < choiceCount; mask += 1) {
+    const chosenTokens = tokens.map((item, index) => {
+      const ambiguityPosition = ambiguousIndexes.indexOf(index);
+      if (ambiguityPosition === -1) {
+        return item;
+      }
+      const chosenType = (mask & (1 << ambiguityPosition)) ? "movement_modifier" : "contact";
+      return forceAmbiguousToken(item, chosenType);
+    });
+    const sequence = compactSequence(
+      `variant-${mask + 1}`,
+      `Вариант ${mask + 1}`,
+      buildUnits(chosenTokens)
+    );
+    const key = JSON.stringify(sequence.units.map((unit) => [
+      unit.kind,
+      unit.raw,
+      unit.components.map((component) => [component.role, component.raw])
+    ]));
+    if (!seen.has(key)) {
+      seen.add(key);
+      variants.push(sequence);
+    }
+  }
+
+  return variants;
+}
+
+/**
+ * Принудительно выбирает одну из интерпретаций для ! или ;.
+ *
+ * @param {object} ambiguousToken - Исходный неоднозначный токен.
+ * @param {string} chosenType - contact или movement_modifier.
+ * @returns {object} Токен выбранного типа.
+ */
+function forceAmbiguousToken(ambiguousToken, chosenType) {
+  const dictionary = chosenType === "movement_modifier" ? MOVEMENT_MODIFIERS : CONTACTS;
+  return {
+    ...ambiguousToken,
+    type: chosenType,
+    typeLabel: TYPE_LABELS[chosenType],
+    label: dictionary[ambiguousToken.raw]?.label ?? ambiguousToken.label,
+    interpretedFrom: "ambiguous_contact_modifier",
+    interpretationReason: "выбран как вариант альтернативного разбора"
+  };
+}
+
+/**
+ * Сжимает единицы разбора до JSON-структуры без вложенных ссылок на токены.
+ *
+ * @param {string} kind - Машинный тип варианта.
+ * @param {string} label - Подпись варианта.
+ * @param {Array<object>} units - Единицы разбора.
+ * @returns {object} Компактное описание последовательности.
+ */
+function compactSequence(kind, label, units) {
+  return {
+    kind,
+    label,
+    units: units.map((unit) => ({
+      kind: unit.kind,
+      title: unit.title,
+      raw: unit.raw,
+      components: (unit.components ?? []).map((component) => ({
+        role: component.role,
+        raw: component.raw,
+        label: component.label ?? null,
+        children: (component.children ?? []).map((child) => ({
+          role: child.role,
+          raw: child.raw,
+          label: child.label ?? null
+        }))
+      }))
+    }))
+  };
+}
+
+/**
+ * Валидирует разбор и возвращает предупреждения/ошибки.
+ *
+ * @param {string} normalized - Строка после удаления пробелов и невидимых символов.
+ * @param {Array<object>} tokens - Токены.
+ * @param {Array<object>} units - Единицы разбора.
+ * @returns {Array<object>} Диагностика.
+ */
+function validateParse(normalized, tokens, units) {
+  const diagnostics = [];
+
+  if (normalized.length === 0) {
+    diagnostics.push({
+      severity: "warning",
+      title: "Пустой ввод",
+      message: "Введите запись одного жеста в системе Шрифт РЖЯ."
+    });
+    return diagnostics;
+  }
+
+  tokens.forEach((item) => {
+    if (item.type === "unknown") {
+      diagnostics.push({
+        severity: item.severity ?? "error",
+        title: "Неизвестный символ",
+        message: `${item.raw}: ${item.label}`,
+        token: item
+      });
+    }
+
+    if (item.type === "group_unknown") {
+      diagnostics.push({
+        severity: "warning",
+        title: "Группа распознана не полностью",
+        message: `${item.raw}: ${item.label}. Добавьте её в словарь, если это допустимая цепочка системы.`,
+        token: item
+      });
+    }
+
+    if (item.type === "orientation_part") {
+      diagnostics.push({
+        severity: "warning",
+        title: "Неполная ориентация",
+        message: `${item.raw}: одиночный символ ориентации. Обычно ориентация состоит из двух символов.`,
+        token: item
+      });
+    }
+  });
+
+  units.forEach((unit, unitIndex) => {
+    if (unit.kind === "timeline" && unitIndex === 0) {
+      diagnostics.push({
+        severity: "warning",
+        title: "Таймлайн без начального кадра",
+        message: `${unit.raw}: движение стоит в начале записи. Проверьте, не пропущено ли положение руки до движения.`,
+        unit
+      });
+    }
+
+    if (unit.kind === "frame") {
+      validateFrame(unit, diagnostics);
+    }
+
+    if (unit.kind === "timeline") {
+      validateTimeline(unit, diagnostics);
+    }
+  });
+
+  if (diagnostics.length === 0) {
+    diagnostics.push({
+      severity: "ok",
+      title: "Запись разобрана",
+      message: "Явных ошибок не найдено."
+    });
+  }
+
+  addInterpretationNotes(units, diagnostics);
+  addHandLocationNotes(units, diagnostics);
+
+  return diagnostics;
+}
+
+/**
+ * Проверяет кадр на типичные неполноты.
+ *
+ * @param {object} frame - Кадр.
+ * @param {Array<object>} diagnostics - Массив диагностики для пополнения.
+ */
+function validateFrame(frame, diagnostics) {
+  if (frame.hands.length === 0 && frame.locations.length === 0 && frame.groups.length === 0) {
+    diagnostics.push({
+      severity: "warning",
+      title: "Кадр без руки и локализации",
+      message: `${frame.raw}: кадр не содержит конфигурации, ориентации или локализации.`,
+      unit: frame
+    });
+  }
+
+  if (frame.carryOver) {
+    diagnostics.push({
+      severity: "warning",
+      title: "Сокращённый кадр без новой конфигурации",
+      message: `${frame.raw}: ${frame.carryOver.message}. Это допустимое сокращение, если руки действительно сохраняются из предыдущего кадра; проверьте, не пропущена ли конфигурация.`,
+      unit: frame
+    });
+  }
+
+  frame.hands.forEach((hand) => {
+    if (!hand.handshape) {
+      diagnostics.push({
+        severity: "warning",
+        title: "Рука без конфигурации",
+        message: `${hand.raw}: есть ориентация, но нет явной конфигурации руки. Иногда это допустимое сокращение, но лучше проверить запись.`,
+        unit: frame
+      });
+    }
+  });
+
+  if (frame.contacts.length > 0 && frame.hands.length === 0 && frame.locations.length === 0) {
+    diagnostics.push({
+      severity: "warning",
+      title: "Контакт без опоры",
+      message: `${frame.raw}: контакт обычно связывает руку с рукой, телом или локализацией.`,
+      unit: frame
+    });
+  }
+}
+
+/**
+ * Проверяет таймлайн на типичные неполноты.
+ *
+ * @param {object} timeline - Таймлайн.
+ * @param {Array<object>} diagnostics - Массив диагностики для пополнения.
+ */
+function validateTimeline(timeline, diagnostics) {
+  const hasMovement = timeline.movements.length > 0;
+  const hasOnlyModifiers = timeline.modifiers.length > 0 && !hasMovement && timeline.nonDominant.length === 0;
+
+  if (hasOnlyModifiers) {
+    diagnostics.push({
+      severity: "warning",
+      title: "Модификатор без движения",
+      message: `${timeline.raw}: модификатор стоит без явного движения. Возможно, он относится к предыдущему движению или к контакту.`,
+      unit: timeline
+    });
+  }
+}
+
+/**
+ * Добавляет пояснения по неоднозначным ! и ;.
+ *
+ * @param {Array<object>} units - Единицы разбора.
+ * @param {Array<object>} diagnostics - Массив диагностики для пополнения.
+ */
+function addInterpretationNotes(units, diagnostics) {
+  units
+    .flatMap((unit) => unit.tokens ?? [])
+    .filter((item) => item.interpretedFrom === "ambiguous_contact_modifier")
+    .forEach((item) => {
+      diagnostics.push({
+        severity: "info",
+        title: "Неоднозначный символ интерпретирован по контексту",
+        message: `${item.raw}: выбран тип «${item.typeLabel}», потому что ${item.interpretationReason}.`,
+        token: item
+      });
+    });
+}
+
+/**
+ * Добавляет примечание о локализациях на неведущей руке.
+ *
+ * @param {Array<object>} units - Единицы разбора.
+ * @param {Array<object>} diagnostics - Массив диагностики для пополнения.
+ */
+function addHandLocationNotes(units, diagnostics) {
+  units
+    .filter((unit) => unit.kind === "frame")
+    .flatMap((unit) => unit.locations.map((location) => ({ unit, location })))
+    .filter(({ location }) => location.subtype?.includes("кисть"))
+    .forEach(({ unit, location }) => {
+      diagnostics.push({
+        severity: "info",
+        title: "Локализация на неведущей руке",
+        message: `${location.raw}: ${location.label}. В таких случаях конфигурация неведущей руки может быть частью локализации, поэтому отдельная конфигурация руки иногда не пишется.`,
+        unit,
+        token: location
+      });
+    });
+}
+
+/**
+ * Считает краткую статистику разбора.
+ *
+ * @param {Array<object>} tokens - Токены.
+ * @param {Array<object>} units - Единицы разбора.
+ * @param {Array<object>} diagnostics - Диагностика.
+ * @returns {object} Статистика.
+ */
+function summarize(tokens, units, diagnostics) {
+  return {
+    tokenCount: tokens.length,
+    frameCount: units.filter((unit) => unit.kind === "frame").length,
+    timelineCount: units.filter((unit) => unit.kind === "timeline").length,
+    nonmanualCount: units.filter((unit) => unit.kind === "nonmanual").length,
+    errorCount: diagnostics.filter((item) => item.severity === "error").length,
+    warningCount: diagnostics.filter((item) => item.severity === "warning").length
+  };
+}
