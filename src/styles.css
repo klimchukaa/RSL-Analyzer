@@ -261,3 +261,250 @@ textarea {
   font-size: 0.82rem;
 }
 
+.token-handshape { background: var(--token-handshape); }
+.token-orientation,
+.token-orientation_part { background: var(--token-orientation); }
+.token-location,
+.token-relative_location,
+.token-locus { background: var(--token-location); }
+.token-contact { background: var(--token-contact); }
+.token-ambiguous_contact_modifier { background: var(--token-ambiguous); }
+.token-movement,
+.token-circular_movement { background: var(--token-movement); }
+.token-non_dominant_movement,
+.token-movement_modifier,
+.token-plane { background: var(--token-modifier); }
+.token-nonmanual,
+.token-eye_movement,
+.token-head_movement,
+.token-shoulder_movement { background: var(--token-nonmanual); }
+.token-group_unknown {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--token-service),
+    var(--token-service) 8px,
+    var(--token-unknown) 8px,
+    var(--token-unknown) 16px
+  );
+}
+.token-unknown { background: var(--token-unknown); }
+
+.diagnostics {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.diagnostic {
+  border-left: 5px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.75rem 0.9rem;
+}
+
+.diagnostic p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+}
+
+.diagnostic-ok { border-color: var(--ok); }
+.diagnostic-warning { border-color: var(--warning); }
+.diagnostic-error { border-color: var(--error); }
+.diagnostic-info { border-color: var(--info); }
+
+.parse-tree,
+.parse-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.parse-tree {
+  padding-left: 0;
+}
+
+.parse-tree li {
+  margin: 0.35rem 0;
+  position: relative;
+}
+
+.parse-tree li::before {
+  content: "";
+  position: absolute;
+  left: -0.85rem;
+  top: 0.75rem;
+  width: 0.55rem;
+  height: 1px;
+  background: var(--border);
+}
+
+.parse-tree > li::before {
+  display: none;
+}
+
+.tree-note {
+  margin: 0.5rem 0;
+  color: var(--muted);
+}
+
+.selection-details {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.selection-details p {
+  margin: 0;
+}
+
+.selection-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.selection-details dt {
+  color: var(--muted);
+}
+
+.selection-details dd {
+  margin: 0;
+}
+
+.selection-raw {
+  width: fit-content;
+  font-size: 1.35rem;
+}
+
+.semantic {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.semantic p {
+  margin: 0;
+}
+
+.semantic-status {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-weight: 700;
+}
+
+.semantic-supported {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.semantic-unsupported {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.semantic-explanation {
+  border-radius: 16px;
+  background: var(--panel-soft);
+  padding: 0.85rem 1rem;
+}
+
+.semantic-reasons {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+}
+
+.semantic dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.semantic dt {
+  color: var(--muted);
+}
+
+.semantic dd {
+  margin: 0;
+}
+
+.sequences details {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.75rem 0.9rem;
+  background: #fff;
+  margin-bottom: 0.6rem;
+}
+
+.sequences summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover,
+tbody tr.is-selected-row {
+  background: var(--panel-soft);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+pre {
+  max-height: 430px;
+  overflow: auto;
+  border-radius: 18px;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 1rem;
+  white-space: pre-wrap;
+}
+
+#json-output {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.footer {
+  color: var(--muted);
+  padding: 0 max(1.25rem, calc((100vw - 1180px) / 2)) 2rem;
+}
+
+.footer a {
+  color: inherit;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .input-panel {
+    position: static;
+  }
+}
