@@ -328,3 +328,305 @@ function selectToken(item) {
   renderTree(lastParsed);
   renderTokenTable(lastParsed.tokens);
 }
+
+/**
+ * Рисует карточку выбранного токена.
+ *
+ * @param {object} parsed - Полный разбор.
+ */
+function renderSelection(parsed) {
+  selectionDetails.replaceChildren();
+  const selected = findSelectedToken(parsed);
+
+  if (!selected) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "Нажмите на токен в подсветке, дереве или таблице, чтобы увидеть объяснение.";
+    selectionDetails.append(empty);
+    return;
+  }
+
+  const title = document.createElement("strong");
+  title.textContent = selected.typeLabel;
+
+  const raw = makeRslInline(selected.raw, "selection-raw");
+
+  const description = document.createElement("p");
+  appendMixedLabel(description, selected.description ?? getDisplayedTokenLabel(selected) ?? "Для этого элемента пока нет подробного описания.");
+
+  const meta = document.createElement("dl");
+  appendDefinition(meta, "Символы", selected.raw, true);
+  appendDefinition(meta, "Значение", getDisplayedTokenLabel(selected) ?? "неизвестно / требуется уточнение");
+  appendDefinition(meta, "Распознаватель", selected.recognizer ?? "одиночный символ / контекст");
+
+  selectionDetails.append(title, raw, description, meta);
+
+  if (selected.candidates?.length > 0) {
+    const candidatesTitle = document.createElement("strong");
+    candidatesTitle.textContent = "Возможные чтения";
+    const list = document.createElement("ul");
+    selected.candidates.forEach((candidate) => {
+      const item = document.createElement("li");
+      item.append(document.createTextNode(`${TYPE_LABELS[candidate.type] ?? candidate.type}: `));
+      appendMixedLabel(item, candidate.label);
+      list.append(item);
+    });
+    selectionDetails.append(candidatesTitle, list);
+  }
+}
+
+/**
+ * Добавляет строку в список определений.
+ *
+ * @param {HTMLElement} list - DL-элемент.
+ * @param {string} term - Термин.
+ * @param {string} value - Значение.
+ * @param {boolean} rsl - Нужно ли показывать значение шрифтом РЖЯ.
+ */
+function appendDefinition(list, term, value, rsl = false) {
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  if (rsl) {
+    dd.append(makeRslInline(value));
+  } else {
+    appendMixedLabel(dd, value);
+  }
+  list.append(dt, dd);
+}
+
+/**
+ * Рисует бета-описание простого паттерна на естественном русском языке.
+ *
+ * @param {object} layer - Результат buildSemanticLayer().
+ */
+function renderSemantic(layer) {
+  semanticOutput.replaceChildren();
+
+  const status = document.createElement("p");
+  status.className = `semantic-status semantic-${layer.supported ? "supported" : "unsupported"}`;
+  status.textContent = layer.title;
+  semanticOutput.append(status);
+
+  const explanation = document.createElement("p");
+  explanation.className = "semantic-explanation";
+  appendExplanationSegments(explanation, layer.explanationSegments);
+  semanticOutput.append(explanation);
+
+  if (!layer.supported && layer.unsupportedReasons.length > 0) {
+    const list = document.createElement("ul");
+    list.className = "semantic-reasons";
+    layer.unsupportedReasons.forEach((reason) => {
+      const item = document.createElement("li");
+      item.textContent = reason;
+      list.append(item);
+    });
+    semanticOutput.append(list);
+    return;
+  }
+
+  if (layer.semantic) {
+    const meta = document.createElement("dl");
+    appendDefinition(meta, "Статус", "простая запись поддержана бета-модулем");
+    if (layer.semantic.frame?.location) {
+      appendDefinition(meta, "Локализация", layer.semantic.frame.location.where);
+    }
+    if (layer.semantic.timeline?.movements?.length) {
+      appendDefinition(meta, "Движение", layer.semantic.timeline.movements.map((item) => item.phrase).join(", "));
+    }
+    semanticOutput.append(meta);
+  }
+}
+
+/**
+ * Рисует список ошибок, предупреждений и информационных заметок.
+ *
+ * @param {object} parsed - Полный разбор.
+ */
+function renderDiagnostics(parsed) {
+  diagnostics.replaceChildren();
+  parsed.diagnostics.forEach((item) => {
+    const row = document.createElement("article");
+    row.className = `diagnostic diagnostic-${item.severity}`;
+
+    const title = document.createElement("strong");
+    title.textContent = item.title;
+    const message = document.createElement("p");
+    appendDiagnosticMessage(message, item);
+
+    row.append(title, message);
+    diagnostics.append(row);
+  });
+}
+
+/**
+ * Добавляет сообщение валидатора, отделяя RSL-фрагмент от обычного текста.
+ *
+ * @param {HTMLElement} parent - Контейнер сообщения.
+ * @param {object} item - Диагностическое сообщение.
+ */
+function appendDiagnosticMessage(parent, item) {
+  const message = String(item.message ?? "");
+  const raw = item.token?.raw ?? item.unit?.raw ?? "";
+  if (raw && message.startsWith(raw)) {
+    parent.append(makeRslInline(raw, "in-text"));
+    parent.append(document.createTextNode(message.slice(raw.length)));
+    return;
+  }
+  appendMixedLabel(parent, message);
+}
+
+/**
+ * Рисует иерархическое дерево разбора.
+ *
+ * @param {object} parsed - Полный разбор.
+ */
+function renderTree(parsed) {
+  tree.replaceChildren();
+  const root = document.createElement("ul");
+  root.className = "parse-tree";
+
+  const rootItem = document.createElement("li");
+  const title = document.createElement("strong");
+  title.textContent = "Жестовая запись";
+  if (parsed.normalized) {
+    title.append(document.createTextNode(": "), makeRslInline(parsed.normalized, "in-text"));
+  }
+  rootItem.append(title);
+
+  if (parsed.exactGloss) {
+    const gloss = document.createElement("div");
+    gloss.className = "tree-note";
+    gloss.textContent = `Словарная подсказка: «${parsed.exactGloss}». Это не машинный перевод, а совпадение с мини-словарём примеров.`;
+    rootItem.append(gloss);
+  }
+
+  const unitsList = document.createElement("ul");
+  if (parsed.units.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "muted";
+    empty.textContent = "Единицы разбора появятся после ввода.";
+    unitsList.append(empty);
+  } else {
+    parsed.units.forEach((unit) => unitsList.append(renderUnit(unit)));
+  }
+  rootItem.append(unitsList);
+  root.append(rootItem);
+  tree.append(root);
+}
+
+/**
+ * Рисует одну единицу разбора: кадр, таймлайн или немануальный компонент.
+ *
+ * @param {object} unit - Единица разбора.
+ * @returns {HTMLElement} Узел списка.
+ */
+function renderUnit(unit) {
+  const li = document.createElement("li");
+  const heading = document.createElement("strong");
+  heading.textContent = `${unit.title}: `;
+  heading.append(makeRslInline(unit.raw, "in-text"));
+  li.append(heading);
+
+  if (unit.components.length > 0) {
+    const componentList = document.createElement("ul");
+    unit.components.forEach((component) => {
+      componentList.append(renderComponent(component));
+    });
+    li.append(componentList);
+  }
+
+  return li;
+}
+
+/**
+ * Рисует компонент внутри кадра или таймлайна.
+ *
+ * @param {object} component - Компонент.
+ * @returns {HTMLElement} Узел списка.
+ */
+function renderComponent(component) {
+  const li = document.createElement("li");
+  const text = document.createElement("span");
+  const subtype = component.subtype ? `, ${component.subtype}` : "";
+
+  if (component.raw) {
+    const raw = document.createElement("code");
+    raw.className = `rsl-inline rsl-selectable token-${component.token?.type ?? "unknown"}`;
+    if (component.token && isSelected(component.token)) {
+      raw.classList.add("is-selected");
+    }
+    raw.textContent = component.raw;
+
+    if (component.token) {
+      raw.role = "button";
+      raw.tabIndex = 0;
+      raw.title = "Выбрать элемент";
+      raw.addEventListener("click", () => selectToken(component.token));
+      raw.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectToken(component.token);
+        }
+      });
+    }
+
+    text.append(document.createTextNode(` ${component.role}${subtype}: `));
+    li.append(raw, text);
+  } else {
+    text.append(document.createTextNode(`${component.role}${subtype}: `));
+    li.append(text);
+  }
+
+  appendMixedLabel(text, component.label ?? "без подписи");
+
+  if (component.children?.length > 0) {
+    const children = document.createElement("ul");
+    component.children.forEach((child) => children.append(renderComponent(child)));
+    li.append(children);
+  }
+
+  return li;
+}
+
+/**
+ * Рисует компактные варианты последовательности кадр/таймлайн.
+ *
+ * @param {object} parsed - Полный разбор.
+ */
+function renderSequences(parsed) {
+  sequences.replaceChildren();
+  if (parsed.possibleSequences.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "Нет вариантов.";
+    sequences.append(empty);
+    return;
+  }
+
+  parsed.possibleSequences.forEach((sequence, index) => {
+    const details = document.createElement("details");
+    details.open = index === 0;
+    const summary = document.createElement("summary");
+    summary.textContent = `${sequence.label}: ${sequence.units?.length ?? 0} ед.`;
+    details.append(summary);
+
+    if (sequence.note) {
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = sequence.note;
+      details.append(note);
+    }
+
+    const list = document.createElement("ol");
+    (sequence.units ?? []).forEach((unit) => {
+      const item = document.createElement("li");
+      item.append(document.createTextNode(`${unit.title}: `), makeRslInline(unit.raw, "in-text"));
+      list.append(item);
+    });
+    details.append(list);
+    sequences.append(details);
+  });
+}
+
+/**
