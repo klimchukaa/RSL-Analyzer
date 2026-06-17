@@ -78,7 +78,7 @@ export const FINGER_ORIENTATION_SYMBOLS = Object.freeze(["Э", "-", "\"", "=", "
 export const THUMB_ORIENTATION_SYMBOLS = Object.freeze([".", "Ё"]);
 
 export const FINGER_ORIENTATION_LABELS = Object.freeze({
-  "Э": "кисть ребром «Э»",
+  "Э": "кисть вертикально ребром «Э»",
   "-": "кисть параллельно полу вбок «-»",
   "\"": "кисть вертикально фасадом «\"»",
   "=": "кисть горизонтально фасадом «=»",
