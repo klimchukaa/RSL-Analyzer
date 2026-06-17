@@ -484,7 +484,7 @@ function buildExplanationSegments(semantic) {
   if (semantic.nonmanual) {
     pushText(segments, "Перед жестом указан немануальный компонент ");
     pushRsl(segments, semantic.nonmanual.raw);
-    pushText(segments, ` (${semantic.nonmanual.name}). `);
+    pushText(segments, ` — ${semantic.nonmanual.name}. `);
   }
 
   const frame = semantic.frame;
