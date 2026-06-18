@@ -1,6 +1,6 @@
 {
   "name": "rsl-font-analyzer",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Интерактивный анализатор записи жестов в системе Шрифт РЖЯ.",
   "type": "module",
   "scripts": {
