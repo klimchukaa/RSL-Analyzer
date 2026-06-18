@@ -138,7 +138,7 @@ function renderHighlight(parsed) {
   if (parsed.tokens.length === 0) {
     const empty = document.createElement("span");
     empty.className = "muted";
-    empty.textContent = "Введите запись.";
+    empty.textContent = "Токены появятся после ввода.";
     highlight.append(empty);
     return;
   }
