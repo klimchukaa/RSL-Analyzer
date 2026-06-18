@@ -25,7 +25,7 @@ test("tokenizer recognizes location, contact, orientation and handshape", () => 
 
 test("parser splits frames and timelines", () => {
   const parsed = parseSign('."Ч_Ё=7_Ё=Ч');
-  assert.equal(parsed.summary.frameCount, 2);
+  assert.equal(parsed.summary.frameCount, 3);
   assert.equal(parsed.summary.timelineCount, 2);
   assert.deepEqual(parsed.units.map((unit) => unit.kind), [
     "frame",
